@@ -33,17 +33,19 @@
         definition: "{{ rendered_temp_deployment }}"
         namespace: default
 
-    - name: Wait for temporary deployment to be ready
+    - name: Wait until temporary deployment exists and is ready
       kubernetes.core.k8s_info:
         api_version: apps/v1
         kind: Deployment
-        namespace: default
         name: "{{ temp_deployment_name }}"
-      register: temp_deploy_info
-      until: temp_deploy_info.resources[0].status.availableReplicas is defined and
-             temp_deploy_info.resources[0].status.availableReplicas >= temp_deploy_info.resources[0].spec.replicas
-      retries: 10
-      delay: 15
+        namespace: default
+      register: deploy_info
+      until:
+        - deploy_info.resources | length > 0
+        - deploy_info.resources[0].status.availableReplicas is defined
+        - deploy_info.resources[0].status.availableReplicas >= deploy_info.resources[0].spec.replicas
+      retries: 15
+      delay: 10
 
     - name: Delete old compare-app deployment
       k8s:
