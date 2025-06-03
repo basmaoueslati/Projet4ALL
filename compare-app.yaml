@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: frontend
-  name: {{ DEPLOYMENT_NAME | default("compare-app") }}
+  name: compare-app  # Static name for replacement in playbook
 spec:
   replicas: 3
   selector:
@@ -15,9 +15,9 @@ spec:
         app: frontend
     spec:
       containers:
-      - image: basmaoueslati/compare-appf25:{{ IMAGE_TAG }} 
-        name: compare-container
-        imagePullPolicy: Always 
+        - name: compare-container
+          image: basmaoueslati/compare-appf25:{{ IMAGE_TAG }}  # Will be replaced in playbook
+          imagePullPolicy: Always
 ---
 apiVersion: v1
 kind: Service
@@ -25,15 +25,10 @@ metadata:
   name: compare-svc
 spec:
   ports:
-  - port: 8080
-    protocol: TCP
-    targetPort: 8080
-    nodePort: 30100
+    - port: 8080
+      protocol: TCP
+      targetPort: 8080
+      nodePort: 30100
   selector:
     app: frontend
   type: NodePort
-
-
-
-
-  
