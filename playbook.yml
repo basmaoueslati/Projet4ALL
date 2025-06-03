@@ -3,71 +3,67 @@
   hosts: localhost
   gather_facts: yes
   vars:
-    ansible_python_interpreter: "/opt/ansible-env/bin/python"
-    temp_deployment_name: "compare-app-temp"
-  collections:
-    - community.kubernetes
+    namespace: default
+    app_name: compare-app
+    container_name: compare-app
+    new_image: "basmaoueslati/compare-app:{{ NEXT_VERSION }}"
+    deployment_name: "{{ app_name }}"
+
   tasks:
-    - name: Load deployment template content from file
-      slurp:
-        src: compare-app.yaml
-      register: deployment_template_raw
 
-    - name: Decode deployment template content
-      set_fact:
-        deployment_template: "{{ deployment_template_raw.content | b64decode }}"
-
-    - name: Preprocess template for temporary deployment
-      set_fact:
-        rendered_temp_deployment: >-
-          {{
-            deployment_template
-            | regex_replace('(?m)^  name: compare-app$', '  name: ' ~ temp_deployment_name)
-            | replace('{{ IMAGE_TAG }}', NEXT_VERSION)
-          }}
-
-    - name: Apply new temporary deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: present
-        definition: "{{ rendered_temp_deployment }}"
-        namespace: default
-
-    - name: Wait until temporary deployment exists and is ready
+    - name: Get current deployment info
       kubernetes.core.k8s_info:
-        api_version: apps/v1
         kind: Deployment
-        name: "{{ temp_deployment_name }}"
-        namespace: default
-      register: deploy_info
-      until:
-        - deploy_info.resources | length > 0
-        - deploy_info.resources[0].status.availableReplicas is defined
-        - deploy_info.resources[0].status.availableReplicas >= deploy_info.resources[0].spec.replicas
-      retries: 15
-      delay: 10
+        namespace: "{{ namespace }}"
+        name: "{{ deployment_name }}"
+      register: current_deployment
+      failed_when: false
 
-    - name: Delete old compare-app deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: absent
-        api_version: apps/v1
-        kind: Deployment
-        name: compare-app
-        namespace: default
+    - name: Backup current deployment (if exists)
+      set_fact:
+        previous_deployment_spec: "{{ current_deployment.resources[0].spec if current_deployment.resources | length > 0 else {} }}"
 
-    - name: Rename temporary deployment to main deployment
-      k8s:
-        kubeconfig: ~/.kube/config
+    - name: Patch deployment with new image
+      kubernetes.core.k8s:
         state: present
-        definition: "{{ deployment_template | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
-        namespace: default
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ deployment_name }}"
+            namespace: "{{ namespace }}"
+          spec:
+            template:
+              metadata:
+                labels:
+                  version: "{{ NEXT_VERSION }}"
+              spec:
+                containers:
+                  - name: "{{ container_name }}"
+                    image: "{{ new_image }}"
 
-    - name: Delete temporary deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: absent
-        api_version: apps/v1
-        kind: Deployment
-        name: "{{ temp_deployment_name }}"
-        namespace: default
+    - name: Wait for rollout to complete
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - "app={{ app_name }}"
+          - "version={{ NEXT_VERSION }}"
+      register: new_pods
+      retries: 10
+      delay: 10
+      until: >
+        new_pods.resources | selectattr('status.containerStatuses[0].ready', 'defined') |
+        selectattr('status.containerStatuses[0].ready') | length > 0
+
+    - name: Fail play if deployment is not ready
+      fail:
+        msg: "New deployment failed readiness check."
+      when: >
+        new_pods.resources | selectattr('status.containerStatuses[0].ready', 'defined') |
+        selectattr('status.containerStatuses[0].ready') | length == 0
+
+    - name: Print success message
+      debug:
+        msg: "Deployment updated successfully to {{ new_image }}"
+
