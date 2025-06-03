@@ -34,7 +34,7 @@
         namespace: default
 
     - name: Wait for temporary deployment to be ready
-      community.kubernetes.k8s_info:
+      k8s_facts:
         api_version: apps/v1
         kind: Deployment
         namespace: default
