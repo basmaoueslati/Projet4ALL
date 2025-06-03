@@ -49,7 +49,27 @@
                 containers:
                   - name: "{{ deployment_name }}"
                     image: "{{ image_full }}"
+                    imagePullPolicy: Always
       register: deployment_result
+
+    - name: Ensure compare-svc Service exists
+      community.kubernetes.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: compare-svc
+            namespace: "{{ namespace }}"
+          spec:
+            type: NodePort
+            selector:
+              app: "{{ deployment_name }}"
+            ports:
+              - protocol: TCP
+                port: 8080
+                targetPort: 8080
+                nodePort: 30100
 
     - name: Wait for rollout to complete
       community.kubernetes.k8s_info:
