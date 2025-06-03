@@ -1,0 +1,24 @@
+---
+- name: Deploy compare-app on Kubernetes
+  hosts: localhost
+  vars:
+    ansible_python_interpreter: "/opt/ansible-env/bin/python"
+  collections:
+    - community.kubernetes
+  tasks:
+    - name: Delete old deployment (if exists)
+      k8s:
+        kubeconfig: ~/.kube/config
+        state: absent
+        api_version: apps/v1
+        kind: Deployment
+        name: compare-app
+        namespace: default
+      ignore_errors: yes  # Continue if deployment doesn't exist
+
+    - name: Apply new Kubernetes deployment
+      k8s:
+        kubeconfig: ~/.kube/config
+        state: present
+        definition: "{{ lookup('template', 'compare-app.yaml') | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+        namespace: default

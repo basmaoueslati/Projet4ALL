@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: frontend
+  name: compare-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - image: basmaoueslati/compare-appf25:{{ IMAGE_TAG }} 
+        name: compare-container
+        imagePullPolicy: Always 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: compare-svc
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+    nodePort: 30100
+  selector:
+    app: frontend
+  type: NodePort
+
+
+
+
+  
