@@ -58,13 +58,12 @@
         namespace: "{{ namespace }}"
         name: "{{ deployment_name }}"
       register: rollout_info
+      until: rollout_info.resources
+             and rollout_info.resources[0].status.readyReplicas is defined
+             and rollout_info.resources[0].status.readyReplicas == rollout_info.resources[0].spec.replicas
       retries: "{{ rollout_retries }}"
       delay: "{{ rollout_delay }}"
-      until: rollout_info.resources and
-             rollout_info.resources[0].status.readyReplicas is defined and
-             rollout_info.resources[0].status.readyReplicas == rollout_info.resources[0].spec.replicas
 
     - name: Deployment successful
       debug:
         msg: "Deployment {{ deployment_name }} successfully rolled out with image {{ image_full }}"
-
