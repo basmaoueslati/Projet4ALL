@@ -12,7 +12,7 @@ pipeline {
             steps{
                 sh """
                 ansible --version
-                ansible-galaxy collection list
+                ansible-galaxy collection list | grep community.kubernetes
                 which ansible
                 """
         }
