@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: frontend
-  name: compare-app
+  name: {{ DEPLOYMENT_NAME | default("compare-app") }}
 spec:
   replicas: 3
   selector:
