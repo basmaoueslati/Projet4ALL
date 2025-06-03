@@ -9,62 +9,65 @@
     - community.kubernetes
 
   tasks:
-    - name: Apply new temporary deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: present
-        definition: "{{ lookup('template', 'compare-app.yaml') | replace('compare-app', temp_deployment_name) | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
-        namespace: default
+    - name: Deploy and verify new version with rollback
+      block:
+        - name: Apply new temporary deployment
+          k8s:
+            kubeconfig: ~/.kube/config
+            state: present
+            definition: "{{ lookup('template', 'compare-app.yaml') | replace('compare-app', temp_deployment_name) | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+            namespace: default
 
-    - name: Wait for temporary deployment to be ready
-      k8s_info:
-        kubeconfig: ~/.kube/config
-        api_version: apps/v1
-        kind: Deployment
-        name: "{{ temp_deployment_name }}"
-        namespace: default
-      register: temp_deployment
-      until: temp_deployment.resources[0].status.readyReplicas == temp_deployment.resources[0].status.replicas
-      retries: 15
-      delay: 10
-      failed_when: temp_deployment.resources[0].status.readyReplicas is not defined
+        - name: Wait for temporary deployment to be ready
+          k8s_info:
+            kubeconfig: ~/.kube/config
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ temp_deployment_name }}"
+            namespace: default
+          register: temp_deployment
+          until: temp_deployment.resources[0].status.readyReplicas is defined and
+                 temp_deployment.resources[0].status.readyReplicas == temp_deployment.resources[0].status.replicas
+          retries: 15
+          delay: 10
+          failed_when: temp_deployment.resources[0].status.readyReplicas is not defined
 
-    - name: Delete old deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: absent
-        api_version: apps/v1
-        kind: Deployment
-        name: "{{ main_deployment_name }}"
-        namespace: default
-      ignore_errors: yes
+        - name: Delete old deployment (main)
+          k8s:
+            kubeconfig: ~/.kube/config
+            state: absent
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ main_deployment_name }}"
+            namespace: default
+          ignore_errors: yes
 
-    - name: Recreate main deployment using temp definition
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: present
-        definition: "{{ lookup('template', 'compare-app.yaml') | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
-        namespace: default
+        - name: Deploy new version as main
+          k8s:
+            kubeconfig: ~/.kube/config
+            state: present
+            definition: "{{ lookup('template', 'compare-app.yaml') | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+            namespace: default
 
-    - name: Delete temporary deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: absent
-        api_version: apps/v1
-        kind: Deployment
-        name: "{{ temp_deployment_name }}"
-        namespace: default
+        - name: Delete temporary deployment
+          k8s:
+            kubeconfig: ~/.kube/config
+            state: absent
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ temp_deployment_name }}"
+            namespace: default
 
-  rescue:
-    - name: Rollback failed deployment
-      debug:
-        msg: "New deployment failed readiness check. Rolling back to old deployment."
+      rescue:
+        - name: Rollback - delete temporary deployment
+          k8s:
+            kubeconfig: ~/.kube/config
+            state: absent
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ temp_deployment_name }}"
+            namespace: default
 
-    - name: Delete temporary (failed) deployment
-      k8s:
-        kubeconfig: ~/.kube/config
-        state: absent
-        api_version: apps/v1
-        kind: Deployment
-        name: "{{ temp_deployment_name }}"
-        namespace: default
+        - name: Fail the play explicitly after rollback
+          fail:
+            msg: "New deployment failed readiness check. Rollback completed."
