@@ -1,78 +1,71 @@
 ---
 - name: Safely deploy compare-app on Kubernetes with readiness check and rollback
   hosts: localhost
-  connection: local
+  gather_facts: yes
   vars:
     ansible_python_interpreter: "/opt/ansible-env/bin/python"
     temp_deployment_name: "compare-app-temp"
-    original_deployment_name: "compare-app"
   collections:
     - community.kubernetes
-
   tasks:
     - name: Load deployment template content from file
-      set_fact:
-        deployment_template: "{{ lookup('file', 'compare-app.yaml') }}"
+      slurp:
+        src: compare-app.yaml
+      register: deployment_template_raw
 
-    - name: Preprocess template for temp and main deployment
+    - name: Decode deployment template content
       set_fact:
-        rendered_temp_deployment: "{{ deployment_template
-          | replace('compare-app', temp_deployment_name)
-          | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
-        rendered_main_deployment: "{{ deployment_template
-          | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+        deployment_template: "{{ deployment_template_raw.content | b64decode }}"
+
+    - name: Preprocess template for temporary deployment
+      set_fact:
+        rendered_temp_deployment: >-
+          {{
+            deployment_template
+            | regex_replace('(?m)^  name: compare-app$', '  name: ' ~ temp_deployment_name)
+            | replace('{{ IMAGE_TAG }}', NEXT_VERSION)
+          }}
 
     - name: Apply new temporary deployment
       k8s:
         kubeconfig: ~/.kube/config
-        definition: "{{ rendered_temp_deployment }}"
         state: present
-        wait: yes
-        wait_timeout: 60
+        definition: "{{ rendered_temp_deployment }}"
         namespace: default
 
     - name: Wait for temporary deployment to be ready
-      k8s_info:
+      community.kubernetes.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: default
+        name: "{{ temp_deployment_name }}"
+      register: temp_deploy_info
+      until: temp_deploy_info.resources[0].status.availableReplicas is defined and
+             temp_deploy_info.resources[0].status.availableReplicas >= temp_deploy_info.resources[0].spec.replicas
+      retries: 10
+      delay: 15
+
+    - name: Delete old compare-app deployment
+      k8s:
         kubeconfig: ~/.kube/config
+        state: absent
+        api_version: apps/v1
+        kind: Deployment
+        name: compare-app
+        namespace: default
+
+    - name: Rename temporary deployment to main deployment
+      k8s:
+        kubeconfig: ~/.kube/config
+        state: present
+        definition: "{{ deployment_template | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+        namespace: default
+
+    - name: Delete temporary deployment
+      k8s:
+        kubeconfig: ~/.kube/config
+        state: absent
+        api_version: apps/v1
         kind: Deployment
         name: "{{ temp_deployment_name }}"
         namespace: default
-      register: temp_deploy_info
-
-    - name: Check if temporary deployment is ready
-      set_fact:
-        is_ready: "{{ temp_deploy_info.resources[0].status.readyReplicas | default(0) >= 3 }}"
-
-    - block:
-        - name: Delete original deployment
-          k8s:
-            kubeconfig: ~/.kube/config
-            state: absent
-            api_version: apps/v1
-            kind: Deployment
-            name: "{{ original_deployment_name }}"
-            namespace: default
-          ignore_errors: yes
-
-        - name: Apply new stable deployment (renamed back to compare-app)
-          k8s:
-            kubeconfig: ~/.kube/config
-            definition: "{{ rendered_main_deployment }}"
-            state: present
-            namespace: default
-      when: is_ready
-
-      rescue:
-        - name: Rollback - delete temporary deployment
-          k8s:
-            kubeconfig: ~/.kube/config
-            state: absent
-            api_version: apps/v1
-            kind: Deployment
-            name: "{{ temp_deployment_name }}"
-            namespace: default
-          ignore_errors: yes
-
-        - name: Fail the play explicitly after rollback
-          fail:
-            msg: "New deployment failed readiness check. Rollback completed."
