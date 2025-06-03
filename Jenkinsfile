@@ -8,6 +8,15 @@ pipeline {
 
     stages {
         //Continuous Integration
+        stage("Ckeck version of ansible") {
+            steps{
+                sh """
+                ansible --version
+                ansible-galaxy collection list
+                which ansible
+                """
+        }
+        }
         stage('Calculate Version') {
                     steps {
                         script {
