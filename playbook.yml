@@ -1,79 +1,70 @@
 ---
 - name: Safely deploy compare-app on Kubernetes with readiness check and rollback
   hosts: localhost
+  gather_facts: false
   vars:
-    app_name: compare-app
     namespace: default
-    image_name: basmaoueslati/compare-app
-    version: "{{ NEXT_VERSION }}"
+    deployment_name: compare-app
+    image_repo: basmaoueslati/compare-appf25
+    image_full: "{{ image_repo }}:{{ NEXT_VERSION }}"
+    rollout_retries: 10
+    rollout_delay: 15
+
   tasks:
 
-    - name: Check if deployment exists
-      kubernetes.core.k8s_info:
+    - name: Get current deployment info
+      community.kubernetes.k8s_info:
         api_version: apps/v1
         kind: Deployment
-        name: "{{ app_name }}"
         namespace: "{{ namespace }}"
-      register: deployment_info
-      ignore_errors: true
+        name: "{{ deployment_name }}"
+      register: current_deployment
+      ignore_errors: yes
 
-    - name: Set flag if deployment exists
-      set_fact:
-        deployment_exists: "{{ deployment_info.resources | length > 0 }}"
+    - name: Backup current deployment (if exists)
+      copy:
+        content: "{{ current_deployment.resources[0] | to_nice_yaml }}"
+        dest: "/tmp/{{ deployment_name }}-backup.yaml"
+      when: current_deployment.resources | length > 0
 
-    - name: Deploy new application if not exists
-      when: not deployment_exists
-      kubernetes.core.k8s:
+    - name: Patch deployment with new image or create if not exists
+      community.kubernetes.k8s:
         state: present
-        namespace: "{{ namespace }}"
         definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
-            name: "{{ app_name }}"
+            name: "{{ deployment_name }}"
+            namespace: "{{ namespace }}"
           spec:
             replicas: 3
             selector:
               matchLabels:
-                app: "{{ app_name }}"
+                app: "{{ deployment_name }}"
             template:
               metadata:
                 labels:
-                  app: "{{ app_name }}"
-                  version: "{{ version }}"
+                  app: "{{ deployment_name }}"
               spec:
                 containers:
-                  - name: "{{ app_name }}"
-                    image: "{{ image_name }}:{{ version }}"
-                    ports:
-                      - containerPort: 8080
-
-    - name: Patch deployment with new image (if exists)
-      when: deployment_exists
-      kubernetes.core.k8s:
-        state: present
-        kind: Deployment
-        namespace: "{{ namespace }}"
-        name: "{{ app_name }}"
-        merge_type: strategic
-        definition:
-          spec:
-            template:
-              metadata:
-                labels:
-                  version: "{{ version }}"
-              spec:
-                containers:
-                  - name: "{{ app_name }}"
-                    image: "{{ image_name }}:{{ version }}"
+                  - name: "{{ deployment_name }}"
+                    image: "{{ image_full }}"
+      register: deployment_result
 
     - name: Wait for rollout to complete
-      kubernetes.core.k8s_info:
+      community.kubernetes.k8s_info:
         api_version: apps/v1
         kind: Deployment
-        name: "{{ app_name }}"
         namespace: "{{ namespace }}"
-      register: rollout_status
-      retries: 10
-      delay: 10
-      until: rollout_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | map(attribute='status') | first == "True"
+        name: "{{ deployment_name }}"
+      register: rollout_info
+      retries: "{{ rollout_retries }}"
+      delay: "{{ rollout_delay }}"
+      until: rollout_info.resources and
+             rollout_info.resources[0].status.readyReplicas is defined and
+             rollout_info.resources[0].status.readyReplicas == rollout_info.resources[0].spec.replicas
+
+    - name: Deployment successful
+      debug:
+        msg: "Deployment {{ deployment_name }} successfully rolled out with image {{ image_full }}"
+
