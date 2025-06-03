@@ -184,8 +184,7 @@ pipeline {
         stage('Run Ansible Playbook') {
             steps {
                 sh """
-                sed -i 's|image: basmaoueslati/compare-appf25.*|image: basmaoueslati/compare-appf25:${NEXT_VERSION}|g' compare-app.yaml
-              ansible-playbook -i inventory.ini playbook.yml -e NEXT_VERSION=${NEXT_VERSION}
+                    ansible-playbook -i inventory.ini playbook.yml -e NEXT_VERSION=${NEXT_VERSION}
                 """
             }
             post {
