@@ -1,69 +1,81 @@
 ---
 - name: Safely deploy compare-app on Kubernetes with readiness check and rollback
   hosts: localhost
-  gather_facts: yes
   vars:
-    namespace: default
     app_name: compare-app
-    container_name: compare-app
-    new_image: "basmaoueslati/compare-app:{{ NEXT_VERSION }}"
-    deployment_name: "{{ app_name }}"
-
+    namespace: default
+    image_name: basmaoueslati/compare-app
+    version: "{{ NEXT_VERSION }}"
   tasks:
 
-    - name: Get current deployment info
+    - name: Check if deployment exists
       kubernetes.core.k8s_info:
+        api_version: apps/v1
         kind: Deployment
+        name: "{{ app_name }}"
         namespace: "{{ namespace }}"
-        name: "{{ deployment_name }}"
-      register: current_deployment
-      failed_when: false
+      register: deployment_info
+      ignore_errors: true
 
-    - name: Backup current deployment (if exists)
+    - name: Set flag if deployment exists
       set_fact:
-        previous_deployment_spec: "{{ current_deployment.resources[0].spec if current_deployment.resources | length > 0 else {} }}"
+        deployment_exists: "{{ deployment_info.resources | length > 0 }}"
 
-    - name: Patch deployment with new image
+    - name: Deploy new application if not exists
+      when: not deployment_exists
       kubernetes.core.k8s:
         state: present
+        namespace: "{{ namespace }}"
         definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
-            name: "{{ deployment_name }}"
-            namespace: "{{ namespace }}"
+            name: "{{ app_name }}"
+          spec:
+            replicas: 3
+            selector:
+              matchLabels:
+                app: "{{ app_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ app_name }}"
+                  version: "{{ version }}"
+              spec:
+                containers:
+                  - name: "{{ app_name }}"
+                    image: "{{ image_name }}:{{ version }}"
+                    ports:
+                      - containerPort: 8080
+
+    - name: Patch deployment with new image (if exists)
+      when: deployment_exists
+      kubernetes.core.k8s:
+        state: present
+        kind: Deployment
+        namespace: "{{ namespace }}"
+        name: "{{ app_name }}"
+        merge_type: strategic
+        definition:
           spec:
             template:
               metadata:
                 labels:
-                  version: "{{ NEXT_VERSION }}"
+                  version: "{{ version }}"
               spec:
                 containers:
-                  - name: "{{ container_name }}"
-                    image: "{{ new_image }}"
+                  - name: "{{ app_name }}"
+                    image: "{{ image_name }}:{{ version }}"
 
     - name: Wait for rollout to complete
-      kubernetes.core.k8s_info:
-        kind: Pod
-        namespace: "{{ namespace }}"
-        label_selectors:
-          - "app={{ app_name }}"
-          - "version={{ NEXT_VERSION }}"
-      register: new_pods
       retries: 10
       delay: 10
-      until: >
-        new_pods.resources | selectattr('status.containerStatuses[0].ready', 'defined') |
-        selectattr('status.containerStatuses[0].ready') | length > 0
-
-    - name: Fail play if deployment is not ready
-      fail:
-        msg: "New deployment failed readiness check."
-      when: >
-        new_pods.resources | selectattr('status.containerStatuses[0].ready', 'defined') |
-        selectattr('status.containerStatuses[0].ready') | length == 0
-
-    - name: Print success message
-      debug:
-        msg: "Deployment updated successfully to {{ new_image }}"
-
+      until: rollout_status.resources[0].status.conditions[?(@.type=="Available")].status | first == "True"
+      block:
+        - name: Get updated deployment status
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ app_name }}"
+            namespace: "{{ namespace }}"
+          register: rollout_status
