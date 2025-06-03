@@ -9,13 +9,22 @@
     - community.kubernetes
 
   tasks:
+    - name: Load and preprocess deployment template
+      set_fact:
+        deployment_template: "{{ lookup('file', 'compare-app.yaml') }}"
+        rendered_temp_deployment: "{{ deployment_template
+          | replace('compare-app', temp_deployment_name)
+          | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+        rendered_main_deployment: "{{ deployment_template
+          | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+
     - name: Deploy and verify new version with rollback
       block:
         - name: Apply new temporary deployment
           k8s:
             kubeconfig: ~/.kube/config
             state: present
-            definition: "{{ lookup('template', 'compare-app.yaml') | replace('compare-app', temp_deployment_name) | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+            definition: "{{ rendered_temp_deployment }}"
             namespace: default
 
         - name: Wait for temporary deployment to be ready
@@ -46,7 +55,7 @@
           k8s:
             kubeconfig: ~/.kube/config
             state: present
-            definition: "{{ lookup('template', 'compare-app.yaml') | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
+            definition: "{{ rendered_main_deployment }}"
             namespace: default
 
         - name: Delete temporary deployment
