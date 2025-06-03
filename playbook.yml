@@ -9,9 +9,12 @@
     - community.kubernetes
 
   tasks:
-    - name: Load and preprocess deployment template
+    - name: Load deployment template content from file
       set_fact:
         deployment_template: "{{ lookup('file', 'compare-app.yaml') }}"
+
+    - name: Preprocess template for temp and main deployment
+      set_fact:
         rendered_temp_deployment: "{{ deployment_template
           | replace('compare-app', temp_deployment_name)
           | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
