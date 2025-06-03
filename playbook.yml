@@ -1,10 +1,11 @@
 ---
 - name: Safely deploy compare-app on Kubernetes with readiness check and rollback
   hosts: localhost
+  connection: local
   vars:
     ansible_python_interpreter: "/opt/ansible-env/bin/python"
-    temp_deployment_name: compare-app-temp
-    main_deployment_name: compare-app
+    temp_deployment_name: "compare-app-temp"
+    original_deployment_name: "compare-app"
   collections:
     - community.kubernetes
 
@@ -21,54 +22,45 @@
         rendered_main_deployment: "{{ deployment_template
           | replace('{{ IMAGE_TAG }}', NEXT_VERSION) }}"
 
-    - name: Deploy and verify new version with rollback
-      block:
-        - name: Apply new temporary deployment
-          k8s:
-            kubeconfig: ~/.kube/config
-            state: present
-            definition: "{{ rendered_temp_deployment }}"
-            namespace: default
+    - name: Apply new temporary deployment
+      k8s:
+        kubeconfig: ~/.kube/config
+        definition: "{{ rendered_temp_deployment }}"
+        state: present
+        wait: yes
+        wait_timeout: 60
+        namespace: default
 
-        - name: Wait for temporary deployment to be ready
-          k8s_info:
-            kubeconfig: ~/.kube/config
-            api_version: apps/v1
-            kind: Deployment
-            name: "{{ temp_deployment_name }}"
-            namespace: default
-          register: temp_deployment
-          until: temp_deployment.resources[0].status.readyReplicas is defined and
-                 temp_deployment.resources[0].status.readyReplicas == temp_deployment.resources[0].status.replicas
-          retries: 15
-          delay: 10
-          failed_when: temp_deployment.resources[0].status.readyReplicas is not defined
+    - name: Wait for temporary deployment to be ready
+      k8s_info:
+        kubeconfig: ~/.kube/config
+        kind: Deployment
+        name: "{{ temp_deployment_name }}"
+        namespace: default
+      register: temp_deploy_info
 
-        - name: Delete old deployment (main)
+    - name: Check if temporary deployment is ready
+      set_fact:
+        is_ready: "{{ temp_deploy_info.resources[0].status.readyReplicas | default(0) >= 3 }}"
+
+    - block:
+        - name: Delete original deployment
           k8s:
             kubeconfig: ~/.kube/config
             state: absent
             api_version: apps/v1
             kind: Deployment
-            name: "{{ main_deployment_name }}"
+            name: "{{ original_deployment_name }}"
             namespace: default
           ignore_errors: yes
 
-        - name: Deploy new version as main
+        - name: Apply new stable deployment (renamed back to compare-app)
           k8s:
             kubeconfig: ~/.kube/config
-            state: present
             definition: "{{ rendered_main_deployment }}"
+            state: present
             namespace: default
-
-        - name: Delete temporary deployment
-          k8s:
-            kubeconfig: ~/.kube/config
-            state: absent
-            api_version: apps/v1
-            kind: Deployment
-            name: "{{ temp_deployment_name }}"
-            namespace: default
+      when: is_ready
 
       rescue:
         - name: Rollback - delete temporary deployment
@@ -79,6 +71,7 @@
             kind: Deployment
             name: "{{ temp_deployment_name }}"
             namespace: default
+          ignore_errors: yes
 
         - name: Fail the play explicitly after rollback
           fail:
