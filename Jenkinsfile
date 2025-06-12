@@ -3,7 +3,7 @@ pipeline {
     agent any
     environment {
         REPO_URL = "git@github.com:basmaoueslati/trainingTests.git"  
-        BRANCH_NAME = "main"  // Update to your branch
+        BRANCH_NAME = "main" 
     }
 
     stages {
@@ -116,7 +116,7 @@ pipeline {
                 ], 
                 credentialsId: 'nexus', 
                 groupId: 'com.devops', 
-                nexusUrl: '35.180.71.148:8081', 
+                nexusUrl: '51.44.183.179:8081', 
                 nexusVersion: 'nexus3', 
                 protocol: 'http', 
                 repository: 'compare', 
@@ -141,9 +141,7 @@ pipeline {
                     )
                 ]) {
                     script {
-                        // Explicitly pass NEXT_VERSION as an extra variable to Ansible
                         sh """
-                            echo "NEXT_VERSION=${NEXT_VERSION}"  # Debug: Check if version is set
                             ansible-playbook playbook-delivery.yml \
                                 -e build_context=${WORKSPACE} \
                                 -e NEXT_VERSION=${NEXT_VERSION}
@@ -192,6 +190,19 @@ pipeline {
                     sendStageNotification(
                         recipient: 'oueslatibasma2020@gmail.com',
                         stageName: 'Run Ansible Playbook'
+                    )
+                }
+            }
+}
+         stage('Notification') {
+            steps {
+                echo "Success"
+            }
+            post {
+                always {
+                    sendStageNotification(
+                        recipient: 'oueslatibasma2020@gmail.com',
+                        stageName: 'Project Successfully deployed'
                     )
                 }
             }
