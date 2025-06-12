@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   labels:
     app: frontend
-  name: compare-app  # Static name for replacement in playbook
+  name: compare-app  
 spec:
   replicas: 3
   selector:
@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: compare-container
-          image: basmaoueslati/compare-appf25:{{ IMAGE_TAG }}  # Will be replaced in playbook
+          image: basmaoueslati/compare-appf25:{{ IMAGE_TAG }}  
           imagePullPolicy: Always
 ---
 apiVersion: v1
